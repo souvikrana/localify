@@ -5,3 +5,5 @@ coverage
 *.local
 .DS_Store
 npm-debug.log*
+tsconfig.tsbuildinfo
+*.tsbuildinfo
