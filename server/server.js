@@ -6,13 +6,14 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-const ffmpegPath = require('ffmpeg-static');
-
 // Prefer standalone binary, fall back to youtube-dl-exec bundled
 const localBin = path.join(__dirname, 'bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
 const YT_DLP_BIN = fs.existsSync(localBin)
   ? localBin
   : (() => { try { return require('youtube-dl-exec').constants.YOUTUBE_DL_PATH; } catch { return 'yt-dlp'; } })();
+
+// Use system ffmpeg (installed via apt-get in Docker)
+const FFMPEG_PATH = '/usr/bin/ffmpeg';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -148,7 +149,7 @@ app.get('/download', async (req, res) => {
     '-f', 'bestaudio/best',
     '-x', '--audio-format', format,
     '--audio-quality', `${quality}K`,
-    '--ffmpeg-location', path.dirname(ffmpegPath),
+    '--ffmpeg-location', path.dirname(FFMPEG_PATH),
     '--no-playlist', '--no-warnings',
     '-o', outputTemplate,
   ];
@@ -221,5 +222,5 @@ app.get('/health', (_req, res) => res.json({ status: 'ok', service: 'localify-ex
 app.listen(PORT, () => {
   console.log(`Localify extractor → http://localhost:${PORT}`);
   console.log(`yt-dlp: ${YT_DLP_BIN}`);
-  console.log(`ffmpeg: ${ffmpegPath}`);
+  console.log(`ffmpeg: ${FFMPEG_PATH}`);
 });
