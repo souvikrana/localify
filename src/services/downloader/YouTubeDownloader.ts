@@ -8,7 +8,7 @@ import { db } from '@/db/database';
  * Built-in extractor server. Replace with your own Render/Fly.io URL after
  * deployment. Users can also override this in Settings → YouTube Server.
  */
-const DEFAULT_SERVER = 'https://localify-extractor.onrender.com';
+const DEFAULT_SERVER = 'https://ventures-nearly-survivors-lows.trycloudflare.com';
 
 const YT_HOSTS = new Set([
   'youtube.com',
