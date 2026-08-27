@@ -6,11 +6,9 @@ const fs = require('fs');
 const os = require('os');
 const crypto = require('crypto');
 const { spawn } = require('child_process');
-// Prefer standalone binary, fall back to youtube-dl-exec bundled
-const localBin = path.join(__dirname, 'bin', process.platform === 'win32' ? 'yt-dlp.exe' : 'yt-dlp');
-const YT_DLP_BIN = fs.existsSync(localBin)
-  ? localBin
-  : (() => { try { return require('youtube-dl-exec').constants.YOUTUBE_DL_PATH; } catch { return 'yt-dlp'; } })();
+// yt-dlp binary (downloaded in Dockerfile or by fetch-ytdlp.js locally)
+const localBin = path.join(__dirname, 'bin', 'yt-dlp');
+const YT_DLP_BIN = fs.existsSync(localBin) ? localBin : 'yt-dlp';
 
 // Use system ffmpeg (installed via apt-get in Docker)
 const FFMPEG_PATH = '/usr/bin/ffmpeg';
