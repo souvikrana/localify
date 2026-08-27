@@ -10,3 +10,9 @@ tsconfig.tsbuildinfo
 
 server/.venv
 server/__pycache__
+
+server/bin/
+server/node_modules/
+server/.env
+bin/
+server/bin/

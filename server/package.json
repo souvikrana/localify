@@ -1,0 +1,15 @@
+{
+  "name": "localify-extractor",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "postinstall": "node fetch-ytdlp.js",
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.21.0",
+    "ffmpeg-static": "^5.2.0",
+    "youtube-dl-exec": "^2.5.0"
+  }
+}
