@@ -300,9 +300,8 @@ export default function SettingsPage() {
 
       <Section icon={Server} title="YouTube server">
         <p className="py-2 text-sm leading-relaxed text-fg-muted">
-          YouTube audio extraction requires a small server running{' '}
-          <code className="rounded bg-surface-3 px-1.5 py-0.5 text-xs">yt-dlp</code>. Deploy your own
-          (free on Render / Fly.io) and paste the URL below.
+          YouTube audio extraction uses a built-in server. Override the URL below
+          to use your own instance (e.g. self-hosted for faster responses).
         </p>
         <Row label="Server URL">
           <div className="flex items-center gap-2">
@@ -310,8 +309,8 @@ export default function SettingsPage() {
               type="url"
               value={ytServerUrl}
               onChange={(e) => saveYtServerUrl(e.target.value)}
-              placeholder="https://your-server.onrender.com"
-              className="w-64 rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-sm outline-none focus:border-accent"
+              placeholder="Built-in (localify-extractor.onrender.com)"
+              className="w-72 rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-sm outline-none focus:border-accent"
             />
             {ytServerStatus === 'ok' && (
               <span className="flex items-center gap-1 text-xs text-green-400">

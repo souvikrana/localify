@@ -4,6 +4,12 @@ import { AppError } from '@/utils/errors';
 import { sanitizeText, sanitizeUrl } from '@/utils/text';
 import { db } from '@/db/database';
 
+/**
+ * Built-in extractor server. Replace with your own Render/Fly.io URL after
+ * deployment. Users can also override this in Settings → YouTube Server.
+ */
+const DEFAULT_SERVER = 'https://localify-extractor.onrender.com';
+
 const YT_HOSTS = new Set([
   'youtube.com',
   'www.youtube.com',
@@ -38,13 +44,14 @@ function isVideoId(value: string | undefined): value is string {
   return !!value && /^[a-zA-Z0-9_-]{11}$/.test(value);
 }
 
-async function getServerUrl(): Promise<string | null> {
+async function getServerUrl(): Promise<string> {
   try {
     const row = await db.settings.get('yt-server-url');
-    return row?.value && typeof row.value === 'string' ? row.value : null;
+    if (row?.value && typeof row.value === 'string') return row.value;
   } catch {
-    return null;
+    // ignore
   }
+  return DEFAULT_SERVER;
 }
 
 /**
@@ -67,34 +74,32 @@ export class YouTubeDownloader implements MusicDownloader {
     const videoId = extractYouTubeId(url);
     if (!videoId) throw new AppError('That does not look like a YouTube link', 'invalid-url');
 
-    // Try the extractor server first (richer metadata)
+    // Try the extractor server (richer metadata)
     const serverUrl = await getServerUrl();
-    if (serverUrl) {
-      try {
-        const response = await fetch(
-          `${serverUrl}/metadata?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
-          { signal: AbortSignal.timeout(8000) }
-        );
-        if (response.ok) {
-          const data = (await response.json()) as {
-            title?: string;
-            artist?: string;
-            duration?: number;
-            thumbnail?: string;
-          };
-          return {
-            title: sanitizeText(data.title) || 'YouTube Video',
-            artist: sanitizeText(data.artist) || undefined,
-            duration: data.duration,
-            thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-          };
-        }
-      } catch {
-        // Server unreachable — fall through to oEmbed
+    try {
+      const response = await fetch(
+        `${serverUrl}/metadata?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
+        { signal: AbortSignal.timeout(8000) }
+      );
+      if (response.ok) {
+        const data = (await response.json()) as {
+          title?: string;
+          artist?: string;
+          duration?: number;
+          thumbnail?: string;
+        };
+        return {
+          title: sanitizeText(data.title) || 'YouTube Video',
+          artist: sanitizeText(data.artist) || undefined,
+          duration: data.duration,
+          thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        };
       }
+    } catch {
+      // Server unreachable — fall through to oEmbed
     }
 
-    // Fallback: oEmbed (no audio extraction)
+    // Fallback: oEmbed (no audio extraction available)
     const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(
       `https://www.youtube.com/watch?v=${videoId}`
     )}&format=json`;
@@ -128,12 +133,6 @@ export class YouTubeDownloader implements MusicDownloader {
     if (!videoId) throw new AppError('That does not look like a YouTube link', 'invalid-url');
 
     const serverUrl = await getServerUrl();
-    if (!serverUrl) {
-      throw new AppError(
-        'YouTube download requires a Localify extractor server. Set the server URL in Settings → YouTube Server.',
-        'unsupported-format'
-      );
-    }
 
     onProgress?.({ phase: 'downloading', progress: 0 });
 
