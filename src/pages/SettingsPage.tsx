@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   Check,
   CloudUpload,
@@ -7,6 +7,7 @@ import {
   Info,
   Keyboard,
   Palette,
+  Server,
   Settings2,
   Trash2,
 } from 'lucide-react';
@@ -38,6 +39,30 @@ export default function SettingsPage() {
   const [canEncode, setCanEncode] = useState(false);
   const [persistence, setPersistence] = useState<'granted' | 'denied' | 'unsupported'>('unsupported');
   const [usage, setUsage] = useState<Awaited<ReturnType<typeof StorageManager.getUsage>>>();
+  const [ytServerUrl, setYtServerUrl] = useState('');
+  const [ytServerStatus, setYtServerStatus] = useState<'idle' | 'checking' | 'ok' | 'error'>('idle');
+  const ytTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const checkYtServer = async (url: string) => {
+    setYtServerStatus('checking');
+    try {
+      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(5000) });
+      setYtServerStatus(res.ok ? 'ok' : 'error');
+    } catch {
+      setYtServerStatus('error');
+    }
+  };
+
+  const saveYtServerUrl = (raw: string) => {
+    const trimmed = raw.trim().replace(/\/+$/, '');
+    setYtServerUrl(trimmed);
+    clearTimeout(ytTimerRef.current);
+    ytTimerRef.current = setTimeout(() => {
+      void LibraryService.setSetting(SETTINGS_KEYS.YT_SERVER_URL, trimmed);
+      if (trimmed) void checkYtServer(trimmed);
+      else setYtServerStatus('idle');
+    }, 500);
+  };
 
   useEffect(() => {
     void (async () => {
@@ -45,6 +70,9 @@ export default function SettingsPage() {
       setAutoConvert(await LibraryService.getSetting(SETTINGS_KEYS.AUTO_TRANSCODE_LOSSLESS, true));
       setPersistence(await StorageManager.persistenceState());
       setUsage(await StorageManager.getUsage(true));
+      const saved = await LibraryService.getSetting<string>(SETTINGS_KEYS.YT_SERVER_URL, '');
+      setYtServerUrl(saved);
+      if (saved) void checkYtServer(saved);
     })();
   }, []);
 
@@ -267,6 +295,36 @@ export default function SettingsPage() {
           <Button variant="surface" size="sm" onClick={() => openDialog({ type: 'addMusic' })}>
             Import / download
           </Button>
+        </Row>
+      </Section>
+
+      <Section icon={Server} title="YouTube server">
+        <p className="py-2 text-sm leading-relaxed text-fg-muted">
+          YouTube audio extraction requires a small server running{' '}
+          <code className="rounded bg-surface-3 px-1.5 py-0.5 text-xs">yt-dlp</code>. Deploy your own
+          (free on Render / Fly.io) and paste the URL below.
+        </p>
+        <Row label="Server URL">
+          <div className="flex items-center gap-2">
+            <input
+              type="url"
+              value={ytServerUrl}
+              onChange={(e) => saveYtServerUrl(e.target.value)}
+              placeholder="https://your-server.onrender.com"
+              className="w-64 rounded-lg border border-line bg-surface-1 px-3 py-1.5 text-sm outline-none focus:border-accent"
+            />
+            {ytServerStatus === 'ok' && (
+              <span className="flex items-center gap-1 text-xs text-green-400">
+                <Check className="size-3" /> Online
+              </span>
+            )}
+            {ytServerStatus === 'error' && (
+              <span className="text-xs text-red-400">Offline</span>
+            )}
+            {ytServerStatus === 'checking' && (
+              <span className="text-xs text-fg-muted">Checking…</span>
+            )}
+          </div>
         </Row>
       </Section>
 

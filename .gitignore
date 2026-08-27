@@ -7,3 +7,6 @@ coverage
 npm-debug.log*
 tsconfig.tsbuildinfo
 *.tsbuildinfo
+
+server/.venv
+server/__pycache__

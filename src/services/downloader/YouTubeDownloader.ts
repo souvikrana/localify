@@ -1,7 +1,8 @@
 import type { DownloadProgress, TrackMetadata } from '@/types';
+import type { DownloadedAudio, MusicDownloader } from './MusicDownloader';
 import { AppError } from '@/utils/errors';
 import { sanitizeText, sanitizeUrl } from '@/utils/text';
-import type { MusicDownloader } from './MusicDownloader';
+import { db } from '@/db/database';
 
 const YT_HOSTS = new Set([
   'youtube.com',
@@ -22,7 +23,6 @@ export function extractYouTubeId(url: string): string | null {
     }
     const vParam = parsed.searchParams.get('v');
     if (vParam && isVideoId(vParam)) return vParam;
-    // /shorts/<id>, /embed/<id>, /live/<id>
     const segments = parsed.pathname.split('/').filter(Boolean);
     const marker = segments.findIndex((s) => ['shorts', 'embed', 'live', 'v'].includes(s));
     if (marker !== -1 && segments[marker + 1] && isVideoId(segments[marker + 1]!)) {
@@ -38,20 +38,22 @@ function isVideoId(value: string | undefined): value is string {
   return !!value && /^[a-zA-Z0-9_-]{11}$/.test(value);
 }
 
+async function getServerUrl(): Promise<string | null> {
+  try {
+    const row = await db.settings.get('yt-server-url');
+    return row?.value && typeof row.value === 'string' ? row.value : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
- * YouTube support in a purely local app — the honest version.
+ * YouTube downloader with server-side extraction support.
  *
- * Metadata (title/author/thumbnail) resolves client-side through YouTube's
- * public oEmbed endpoint, which permits cross-origin requests. The actual
- * audio stream cannot be fetched by a browser page: googlevideo.com URLs are
- * CORS-restricted and their signatures are generated for YouTube's own web
- * player. Working around that requires a server-side extractor, which this
- * application intentionally does not have.
- *
- * download() therefore fails with a clear, actionable explanation instead of
- * pretending. The interface stays identical to working providers, so a legal,
- * user-authorized extraction backend can be plugged in later without UI
- * changes.
+ * If a local extractor server is configured (via Settings → YouTube Server),
+ * metadata and audio are fetched through it. If no server is configured or
+ * the server is unreachable, falls back to oEmbed metadata and a clear
+ * explanation that audio extraction needs the server.
  */
 export class YouTubeDownloader implements MusicDownloader {
   readonly id = 'youtube';
@@ -65,6 +67,34 @@ export class YouTubeDownloader implements MusicDownloader {
     const videoId = extractYouTubeId(url);
     if (!videoId) throw new AppError('That does not look like a YouTube link', 'invalid-url');
 
+    // Try the extractor server first (richer metadata)
+    const serverUrl = await getServerUrl();
+    if (serverUrl) {
+      try {
+        const response = await fetch(
+          `${serverUrl}/metadata?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
+          { signal: AbortSignal.timeout(8000) }
+        );
+        if (response.ok) {
+          const data = (await response.json()) as {
+            title?: string;
+            artist?: string;
+            duration?: number;
+            thumbnail?: string;
+          };
+          return {
+            title: sanitizeText(data.title) || 'YouTube Video',
+            artist: sanitizeText(data.artist) || undefined,
+            duration: data.duration,
+            thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+          };
+        }
+      } catch {
+        // Server unreachable — fall through to oEmbed
+      }
+    }
+
+    // Fallback: oEmbed (no audio extraction)
     const endpoint = `https://www.youtube.com/oembed?url=${encodeURIComponent(
       `https://www.youtube.com/watch?v=${videoId}`
     )}&format=json`;
@@ -76,14 +106,13 @@ export class YouTubeDownloader implements MusicDownloader {
         author_name?: unknown;
         thumbnail_url?: unknown;
       };
-      const thumbnailUrl = sanitizeUrl(data.thumbnail_url) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`;
       return {
         title: sanitizeText(data.title) || 'YouTube Video',
         artist: sanitizeText(data.author_name) || undefined,
-        thumbnailUrl,
+        thumbnailUrl:
+          sanitizeUrl(data.thumbnail_url) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
       };
     }
-    // Offline or oEmbed unavailable: still show a minimal preview.
     return {
       title: `YouTube Video (${videoId})`,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
@@ -91,13 +120,85 @@ export class YouTubeDownloader implements MusicDownloader {
   }
 
   async download(
-    _url: string,
-    _onProgress?: (progress: DownloadProgress) => void,
-    _signal?: AbortSignal
-  ): Promise<never> {
-    throw new AppError(
-      'YouTube audio cannot be downloaded directly by a browser app',
-      'unsupported-format'
-    );
+    url: string,
+    onProgress?: (progress: DownloadProgress) => void,
+    signal?: AbortSignal
+  ): Promise<DownloadedAudio> {
+    const videoId = extractYouTubeId(url);
+    if (!videoId) throw new AppError('That does not look like a YouTube link', 'invalid-url');
+
+    const serverUrl = await getServerUrl();
+    if (!serverUrl) {
+      throw new AppError(
+        'YouTube download requires a Localify extractor server. Set the server URL in Settings → YouTube Server.',
+        'unsupported-format'
+      );
+    }
+
+    onProgress?.({ phase: 'downloading', progress: 0 });
+
+    let response: Response;
+    try {
+      response = await fetch(
+        `${serverUrl}/download?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}&format=mp3&quality=192`,
+        { signal }
+      );
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      throw new AppError(
+        'Could not reach the extractor server. Make sure it is running and the URL is correct in Settings.',
+        'network'
+      );
+    }
+
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      const msg = (body as { detail?: string }).detail ?? `Server error (${response.status})`;
+      throw new AppError(msg, 'network');
+    }
+
+    const totalBytes = Number(response.headers.get('content-length') ?? 0);
+    const title = response.headers.get('x-video-title') ?? 'YouTube Audio';
+    const artist = response.headers.get('x-video-artist');
+    const duration = Number(response.headers.get('x-video-duration') ?? 0);
+    const thumbnail = response.headers.get('x-video-thumbnail');
+
+    if (!response.body) {
+      throw new AppError('Server returned an empty response', 'network');
+    }
+
+    const reader = response.body.getReader();
+    const chunks: BlobPart[] = [];
+    let received = 0;
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      if (value) {
+        chunks.push(value as unknown as BlobPart);
+        received += value.byteLength;
+        onProgress?.({
+          phase: 'downloading',
+          progress: totalBytes > 0 ? Math.min(99, (received / totalBytes) * 100) : 50,
+          receivedBytes: received,
+          totalBytes: totalBytes || undefined,
+        });
+      }
+    }
+
+    const blob = new Blob(chunks, { type: 'audio/mpeg' });
+    onProgress?.({ phase: 'done', progress: 100 });
+
+    return {
+      blob,
+      suggestedFilename: `${title}.mp3`,
+      sourceUrl: url,
+      metadata: {
+        title: sanitizeText(title) || 'YouTube Audio',
+        artist: artist ? sanitizeText(artist) : undefined,
+        duration: duration || undefined,
+        thumbnailUrl: thumbnail || undefined,
+        sourceUrl: url,
+      },
+    } satisfies DownloadedAudio;
   }
 }

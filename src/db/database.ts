@@ -63,6 +63,7 @@ export const SETTINGS_KEYS = {
   DEFAULT_VOLUME: 'playback.defaultVolume',
   PLAYBACK_SNAPSHOT: 'playback.snapshot',
   ONBOARDED: 'app.onboarded',
+  YT_SERVER_URL: 'yt-server-url',
 } as const;
 
 /** Mirror settings into localStorage so index.html can apply theme pre-paint. */
