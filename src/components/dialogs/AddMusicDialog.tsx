@@ -243,7 +243,8 @@ function LinkTab({
     setLink((s) => ({ ...s, phase: 'previewing' }));
     try {
       const metadata = await downloader.getMetadata(url);
-      setLink((s) => ({ ...s, phase: downloader.id === 'youtube' ? 'blocked' : 'preview', metadata }));
+      const isBlocked = downloader.id === 'youtube' && !(metadata as { serverAvailable?: boolean }).serverAvailable;
+      setLink((s) => ({ ...s, phase: isBlocked ? 'blocked' : 'preview', metadata }));
     } catch (err) {
       setLink((s) => ({
         ...s,

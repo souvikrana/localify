@@ -54,6 +54,10 @@ async function getServerUrl(): Promise<string> {
   return DEFAULT_SERVER;
 }
 
+export interface YouTubeMetadata extends TrackMetadata {
+  serverAvailable?: boolean;
+}
+
 /**
  * YouTube downloader with server-side extraction support.
  *
@@ -70,7 +74,7 @@ export class YouTubeDownloader implements MusicDownloader {
     return extractYouTubeId(url) !== null;
   }
 
-  async getMetadata(url: string): Promise<TrackMetadata> {
+  async getMetadata(url: string): Promise<YouTubeMetadata> {
     const videoId = extractYouTubeId(url);
     if (!videoId) throw new AppError('That does not look like a YouTube link', 'invalid-url');
 
@@ -88,12 +92,13 @@ export class YouTubeDownloader implements MusicDownloader {
           duration?: number;
           thumbnail?: string;
         };
-        return {
-          title: sanitizeText(data.title) || 'YouTube Video',
-          artist: sanitizeText(data.artist) || undefined,
-          duration: data.duration,
-          thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-        };
+          return {
+            title: sanitizeText(data.title) || 'YouTube Video',
+            artist: sanitizeText(data.artist) || undefined,
+            duration: data.duration,
+            thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+            serverAvailable: true,
+          };
       }
     } catch {
       // Server unreachable — fall through to oEmbed
@@ -116,11 +121,13 @@ export class YouTubeDownloader implements MusicDownloader {
         artist: sanitizeText(data.author_name) || undefined,
         thumbnailUrl:
           sanitizeUrl(data.thumbnail_url) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+        serverAvailable: false,
       };
     }
     return {
       title: `YouTube Video (${videoId})`,
       thumbnailUrl: `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
+      serverAvailable: false,
     };
   }
 
