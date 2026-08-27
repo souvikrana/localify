@@ -41,7 +41,7 @@ export function AppShell() {
       <div className="flex min-h-0 flex-1">
         <Sidebar />
         <main
-          className={`min-w-0 flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,0px)+104px)] transition-[margin] duration-300 md:pb-28 ${
+          className={`min-w-0 flex-1 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,0px)+128px)] transition-[margin] duration-300 md:pb-28 ${
             queueOpen ? 'lg:mr-[340px]' : ''
           }`}
         >

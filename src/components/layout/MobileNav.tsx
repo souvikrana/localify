@@ -1,11 +1,12 @@
 import { NavLink } from 'react-router-dom';
-import { Home, Library, Search } from 'lucide-react';
+import { Home, Library, Search, Settings } from 'lucide-react';
 import { clsx } from '@/utils/clsx';
 
 const TABS = [
   { to: '/', label: 'Home', icon: Home, end: true },
   { to: '/search', label: 'Search', icon: Search, end: false },
   { to: '/library/songs', label: 'Library', icon: Library, end: false },
+  { to: '/settings', label: 'Settings', icon: Settings, end: false },
 ] as const;
 
 /** Bottom tab bar — mobile only (md:hidden). Sits under the mini player. */
