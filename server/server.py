@@ -6,6 +6,7 @@ and stream audio. Designed to run on free hosting (Render, Fly.io, etc.).
 """
 
 import asyncio
+import json
 import os
 import re
 import tempfile
@@ -17,7 +18,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 
-app = FastAPI(title="Localify Extractor", version="1.0.0")
+app = FastAPI(title="Localify Extractor", version="1.0.1")
 
 # Allow the GitHub Pages frontend (and local dev)
 ALLOWED_ORIGINS = [
@@ -34,6 +35,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Browser-like user-agent to reduce bot detection
+_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/131.0.0.0 Safari/537.36"
+)
+
 
 def _extract_video_id(url: str) -> Optional[str]:
     """Pull the 11-char video ID from any YouTube URL variant."""
@@ -47,23 +55,38 @@ def _extract_video_id(url: str) -> Optional[str]:
     return None
 
 
-def _make_ydl_opts(audio_format: str = "mp3", audio_quality: str = "192") -> dict:
-    return {
+def _ydl_opts(**overrides) -> dict:
+    base = {
         "quiet": True,
         "no_warnings": True,
-        "skip_download": True,
         "format": "bestaudio/best",
-        # Extract audio as mp3 (most compatible) — yt-dlp + ffmpeg handle this
-        "postprocessors": [
-            {
-                "key": "FFmpegExtractAudio",
-                "preferredcodec": audio_format,
-                "preferredquality": audio_quality,
-            }
-        ],
-        # Concurrency safety: don't let yt-dlp touch the global cookie jar
-        "cookiefile": None,
+        "http_headers": {"User-Agent": _USER_AGENT},
+        "extractor_args": {"youtube": {"player_client": ["web", "mweb"]}},
     }
+    base.update(overrides)
+    return base
+
+
+async def _oembed_metadata(video_id: str) -> Optional[dict]:
+    """Fallback: fetch metadata via YouTube's public oEmbed endpoint."""
+    import urllib.request
+
+    endpoint = (
+        f"https://www.youtube.com/oembed?url=https://www.youtube.com/watch?v={video_id}&format=json"
+    )
+    try:
+        req = urllib.request.Request(endpoint, headers={"User-Agent": _USER_AGENT})
+        with urllib.request.urlopen(req, timeout=8) as resp:
+            data = json.loads(resp.read())
+            return {
+                "videoId": video_id,
+                "title": data.get("title", f"YouTube Video ({video_id})"),
+                "artist": data.get("author_name"),
+                "duration": None,
+                "thumbnail": f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg",
+            }
+    except Exception:
+        return None
 
 
 # ── Metadata endpoint (fast, no audio download) ──────────────────────────
@@ -75,31 +98,34 @@ async def get_metadata(url: str = Query(..., description="YouTube URL")):
     if not video_id:
         raise HTTPException(status_code=400, detail="Not a valid YouTube URL")
 
-    opts = {
-        "quiet": True,
-        "no_warnings": True,
-        "skip_download": True,
-        "format": "bestaudio/best",
-    }
+    # Try yt-dlp first (richer metadata)
+    opts = _ydl_opts(skip_download=True)
 
     def _extract():
         with yt_dlp.YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
-            return info
+            return ydl.extract_info(f"https://www.youtube.com/watch?v={video_id}", download=False)
 
     try:
         info = await asyncio.to_thread(_extract)
-    except Exception as exc:
-        raise HTTPException(status_code=502, detail=f"Extraction failed: {exc}")
+        thumbnail = info.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
+        return {
+            "videoId": video_id,
+            "title": info.get("title") or f"YouTube Video ({video_id})",
+            "artist": info.get("uploader") or info.get("channel"),
+            "duration": info.get("duration"),
+            "thumbnail": thumbnail,
+            "extractionAvailable": True,
+        }
+    except Exception:
+        pass
 
-    thumbnail = info.get("thumbnail") or f"https://i.ytimg.com/vi/{video_id}/hqdefault.jpg"
-    return {
-        "videoId": video_id,
-        "title": info.get("title") or f"YouTube Video ({video_id})",
-        "artist": info.get("uploader") or info.get("channel"),
-        "duration": info.get("duration"),
-        "thumbnail": thumbnail,
-    }
+    # Fallback: oEmbed (always works, no bot detection)
+    result = await _oembed_metadata(video_id)
+    if result:
+        result["extractionAvailable"] = False
+        return result
+
+    raise HTTPException(status_code=502, detail="Could not resolve video metadata")
 
 
 # ── Download endpoint (streams audio bytes) ──────────────────────────────
@@ -118,20 +144,16 @@ async def download_audio(
     with tempfile.TemporaryDirectory() as tmpdir:
         output_template = str(Path(tmpdir) / "audio.%(ext)s")
 
-        opts = {
-            "quiet": True,
-            "no_warnings": True,
-            "format": "bestaudio/best",
-            "outtmpl": output_template,
-            "postprocessors": [
+        opts = _ydl_opts(
+            outtmpl=output_template,
+            postprocessors=[
                 {
                     "key": "FFmpegExtractAudio",
                     "preferredcodec": format,
                     "preferredquality": quality,
                 }
             ],
-            "cookiefile": None,
-        }
+        )
 
         def _download():
             with yt_dlp.YoutubeDL(opts) as ydl:
@@ -141,11 +163,16 @@ async def download_audio(
         try:
             info = await asyncio.to_thread(_download)
         except Exception as exc:
+            msg = str(exc)
+            if "Sign in to confirm" in msg or "bot" in msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail="YouTube is blocking automated downloads from this server. Try a different video or import the file manually.",
+                )
             raise HTTPException(status_code=502, detail=f"Download failed: {exc}")
 
         audio_path = Path(tmpdir) / f"audio.{format}"
         if not audio_path.exists():
-            # Fallback: find whatever yt-dlp produced
             candidates = list(Path(tmpdir).glob("audio.*"))
             if candidates:
                 audio_path = candidates[0]
@@ -153,7 +180,6 @@ async def download_audio(
                 raise HTTPException(status_code=500, detail="Audio file not found after extraction")
 
         filename = f"{info.get('title', 'youtube-audio')}.{format}"
-        # Sanitize filename
         filename = re.sub(r'[^\w\s\-.]', '', filename).strip()
         if not filename:
             filename = f"youtube-audio.{format}"

@@ -32,6 +32,7 @@ interface LinkState {
   metadata?: TrackMetadata;
   progress?: DownloadProgress;
   error?: string;
+  ytExtractionFailed?: boolean;
 }
 
 /**
@@ -243,8 +244,13 @@ function LinkTab({
     setLink((s) => ({ ...s, phase: 'previewing' }));
     try {
       const metadata = await downloader.getMetadata(url);
-      const isBlocked = downloader.id === 'youtube' && !(metadata as { serverAvailable?: boolean }).serverAvailable;
-      setLink((s) => ({ ...s, phase: isBlocked ? 'blocked' : 'preview', metadata }));
+      const extractionFailed = downloader.id === 'youtube' && !(metadata as { serverAvailable?: boolean }).serverAvailable;
+      setLink((s) => ({
+        ...s,
+        phase: 'preview',
+        metadata,
+        ytExtractionFailed: extractionFailed,
+      }));
     } catch (err) {
       setLink((s) => ({
         ...s,
@@ -405,9 +411,18 @@ function LinkTab({
       )}
 
       {link.phase === 'preview' && (
-        <Button variant="accent" onClick={() => void startDownload()} className="w-full">
-          <Download className="size-4" /> Download to library
-        </Button>
+        <>
+          {link.ytExtractionFailed && (
+            <Notice
+              icon={Info}
+              tone="info"
+              text="YouTube may block audio extraction for this video. The download will be attempted — if it fails, try importing the file manually."
+            />
+          )}
+          <Button variant="accent" onClick={() => void startDownload()} className="w-full">
+            <Download className="size-4" /> Download to library
+          </Button>
+        </>
       )}
 
       <p className="px-1 text-xs leading-relaxed text-fg-faint">

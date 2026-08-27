@@ -85,21 +85,22 @@ export class YouTubeDownloader implements MusicDownloader {
         `${serverUrl}/metadata?url=${encodeURIComponent(`https://www.youtube.com/watch?v=${videoId}`)}`,
         { signal: AbortSignal.timeout(8000) }
       );
-      if (response.ok) {
-        const data = (await response.json()) as {
-          title?: string;
-          artist?: string;
-          duration?: number;
-          thumbnail?: string;
-        };
+        if (response.ok) {
+          const data = (await response.json()) as {
+            title?: string;
+            artist?: string;
+            duration?: number;
+            thumbnail?: string;
+            extractionAvailable?: boolean;
+          };
           return {
             title: sanitizeText(data.title) || 'YouTube Video',
             artist: sanitizeText(data.artist) || undefined,
             duration: data.duration,
             thumbnailUrl: sanitizeUrl(data.thumbnail) ?? `https://i.ytimg.com/vi/${videoId}/hqdefault.jpg`,
-            serverAvailable: true,
+            serverAvailable: data.extractionAvailable ?? true,
           };
-      }
+        }
     } catch {
       // Server unreachable — fall through to oEmbed
     }
