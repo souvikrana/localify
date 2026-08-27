@@ -303,6 +303,7 @@ function LinkTab({
       filename,
       title: metadata.title,
       artist: metadata.artist,
+      thumbnailUrl: metadata.thumbnailUrl,
       source: 'url',
       sourceUrl: url,
     });

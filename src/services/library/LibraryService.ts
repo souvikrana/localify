@@ -74,6 +74,7 @@ export class LibraryServiceClass {
       artist?: string;
       source: Track['source'];
       sourceUrl?: string;
+      thumbnailUrl?: string;
       onDuplicate?: ImportOptions['onDuplicate'];
     }
   ): Promise<Track | null> {
@@ -92,12 +93,22 @@ export class LibraryServiceClass {
 
     const { metadata, picture } = await readTags(blob, info.filename);
     if (info.title) metadata.title = sanitizeText(info.title) || metadata.title;
-    if (info.artist && metadata.artist === 'Unknown Artist') {
-      metadata.artist = sanitizeText(info.artist);
-    }
+    if (info.artist) metadata.artist = sanitizeText(info.artist) || metadata.artist;
 
     let artworkId: string | undefined;
-    if (picture) artworkId = (await saveArtwork(picture)) ?? undefined;
+    if (picture) {
+      artworkId = (await saveArtwork(picture)) ?? undefined;
+    } else if (info.thumbnailUrl) {
+      try {
+        const resp = await fetch(info.thumbnailUrl, { signal: AbortSignal.timeout(10000) });
+        if (resp.ok) {
+          const blob = await resp.blob();
+          artworkId = (await saveArtwork(blob)) ?? undefined;
+        }
+      } catch {
+        // thumbnail fetch failed — non-fatal
+      }
+    }
 
     const format = detectFormat({ filename: info.filename, mimeType: blob.type });
     const duration = metadata.duration ?? (await probeDuration(blob, blob.type)) ?? 0;
