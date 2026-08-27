@@ -8,10 +8,13 @@ const crypto = require('crypto');
 const { spawn } = require('child_process');
 // yt-dlp binary (downloaded in Dockerfile or by fetch-ytdlp.js locally)
 const localBin = path.join(__dirname, 'bin', 'yt-dlp');
-const YT_DLP_BIN = fs.existsSync(localBin) ? localBin : 'yt-dlp';
+const parentBin = path.join(__dirname, '..', '..', 'bin', 'yt-dlp');
+const YT_DLP_BIN = fs.existsSync(localBin) ? localBin
+  : fs.existsSync(parentBin) ? parentBin
+  : 'yt-dlp';
 
-// Use system ffmpeg (installed via apt-get in Docker)
-const FFMPEG_PATH = '/usr/bin/ffmpeg';
+// ffmpeg path
+const FFMPEG_PATH = fs.existsSync('/usr/bin/ffmpeg') ? '/usr/bin/ffmpeg' : '/opt/homebrew/bin/ffmpeg';
 
 const app = express();
 const PORT = process.env.PORT || 8000;
@@ -196,13 +199,15 @@ app.get('/download', async (req, res) => {
   const mimeMap = { mp3: 'audio/mpeg', opus: 'audio/opus', m4a: 'audio/mp4' };
   const safeName = title.replace(/[^\w\s\-.]/g, '').trim() || 'youtube-audio';
 
+  const safeHeader = (s) => String(s || '').replace(/[^\x20-\x7E]/g, '');
+
   res.setHeader('Content-Type', mimeMap[format] || 'application/octet-stream');
   res.setHeader('Content-Length', stat.size);
   res.setHeader('Content-Disposition', `attachment; filename="${safeName}.${format}"`);
-  res.setHeader('X-Video-Title', title);
-  res.setHeader('X-Video-Artist', artist);
-  res.setHeader('X-Video-Duration', duration);
-  res.setHeader('X-Video-Thumbnail', thumbnail);
+  res.setHeader('X-Video-Title', safeHeader(title));
+  res.setHeader('X-Video-Artist', safeHeader(artist));
+  res.setHeader('X-Video-Duration', safeHeader(duration));
+  res.setHeader('X-Video-Thumbnail', safeHeader(thumbnail));
   res.setHeader('Cache-Control', 'no-store');
 
   const stream = fs.createReadStream(filePath);
